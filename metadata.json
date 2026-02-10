@@ -1,0 +1,5 @@
+{
+  "name": "BannerGIF",
+  "description": "A tool to generate animated scrolling text banners.",
+  "requestFramePermissions": []
+}
