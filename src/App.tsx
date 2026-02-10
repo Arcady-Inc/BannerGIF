@@ -5,12 +5,12 @@ import { BannerConfig } from './types';
 
 const App: React.FC = () => {
   const [config, setConfig] = useState<BannerConfig>({
-    text: "GALENTINE'S DAY SALE",
+    text: "YOUR TEXT HERE",
     width: 700,
     height: 50,
     bgColor: "#C2185B",
     textColor: "#FFFFFF",
-    fontFamily: "Open Sans",
+    fontFamily: "Inter",
     fontSize: 32,
     fontWeight: "400",
     frameDuration: 100,
@@ -21,20 +21,20 @@ const App: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
 
   return (
-    <div className="flex h-screen w-full bg-gray-50 overflow-hidden font-sans">
+    <div className="flex h-screen w-full overflow-hidden font-sans bg-[#0F172A]">
       {/* Left Sidebar: Fixed Width */}
-      <div className="w-[380px] flex-shrink-0 h-full relative z-30">
-        <ConfigPanel 
-          config={config} 
-          onChange={setConfig} 
-          isGenerating={isGenerating} 
+      <div className="w-[340px] flex-shrink-0 h-full relative z-30">
+        <ConfigPanel
+          config={config}
+          onChange={setConfig}
+          isGenerating={isGenerating}
         />
       </div>
 
       {/* Right Content: Fluid */}
-      <div className="flex-1 h-full relative z-10 flex flex-col min-w-0">
-        <PreviewArea 
-          config={config} 
+      <div className="flex-1 h-full relative z-10 flex flex-col min-w-0 bg-[#F1F5F9]">
+        <PreviewArea
+          config={config}
           setGenerating={setIsGenerating}
           isGenerating={isGenerating}
         />
