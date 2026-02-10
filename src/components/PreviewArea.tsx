@@ -112,7 +112,7 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({ config, setGenerating, isGene
       }}>
 
       {/* Workspace */}
-      <div className="flex-1 overflow-auto flex items-center justify-center relative z-10 custom-scrollbar p-12">
+      <div className="flex-1 overflow-auto flex items-center justify-center relative z-10 custom-scrollbar p-4 sm:p-8 md:p-12">
         <div
           className="relative transition-transform duration-200 ease-out"
           style={{ transform: `scale(${zoom})` }}
@@ -133,7 +133,7 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({ config, setGenerating, isGene
         </div>
 
         {/* Zoom Controls */}
-        <div className="absolute bottom-6 left-6 flex gap-1 bg-white p-1 rounded-lg shadow-lg border border-slate-200">
+        <div className="absolute bottom-3 left-3 sm:bottom-6 sm:left-6 flex gap-1 bg-white p-1 rounded-lg shadow-lg border border-slate-200">
           <button onClick={() => setZoom(Math.max(0.2, zoom - 0.1))} className="p-1.5 hover:bg-slate-100 rounded text-slate-500">
             <ZoomOut className="w-4 h-4" />
           </button>
@@ -147,8 +147,8 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({ config, setGenerating, isGene
       </div>
 
       {/* Floating Control Bar */}
-      <div className="absolute top-6 right-6 z-20">
-        <div className="bg-white/90 backdrop-blur-md border border-white/50 p-2 rounded-2xl shadow-xl flex items-center gap-3">
+      <div className="absolute top-3 right-3 sm:top-6 sm:right-6 z-20 max-w-[calc(100%-1.5rem)] sm:max-w-none">
+        <div className="bg-white/90 backdrop-blur-md border border-white/50 p-1.5 sm:p-2 rounded-xl sm:rounded-2xl shadow-xl flex items-center gap-1.5 sm:gap-3 flex-wrap justify-end">
           {error && (
             <span className="text-red-500 text-xs font-medium flex items-center px-3 py-1.5 bg-red-50 rounded-xl border border-red-100 animate-in fade-in slide-in-from-right-5">
               <AlertCircle className="w-3.5 h-3.5 mr-1.5" />
@@ -159,7 +159,7 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({ config, setGenerating, isGene
           {generatedUrl && (
             <button
               onClick={handleDownload}
-              className="flex items-center text-slate-700 hover:text-indigo-600 px-4 py-2.5 rounded-xl hover:bg-indigo-50/50 transition-all font-semibold text-sm"
+              className="flex items-center text-slate-700 hover:text-indigo-600 px-2.5 sm:px-4 py-2 sm:py-2.5 rounded-xl hover:bg-indigo-50/50 transition-all font-semibold text-xs sm:text-sm"
             >
               <Download className="w-4 h-4 mr-2" />
               Download GIF
@@ -170,7 +170,7 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({ config, setGenerating, isGene
             onClick={handleGenerate}
             disabled={isGenerating}
             className={`
-                 flex items-center justify-center px-6 py-2.5 rounded-xl text-white font-semibold shadow-lg shadow-indigo-500/20
+                 flex items-center justify-center px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl text-white font-semibold text-xs sm:text-sm shadow-lg shadow-indigo-500/20
                  transition-all transform hover:-translate-y-0.5 active:translate-y-0 active:scale-95
                  ${isGenerating
                 ? 'bg-slate-400 cursor-wait'

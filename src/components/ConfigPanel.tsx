@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, Suspense, lazy } from 'react';
 import { BannerConfig, FONTS, FONT_WEIGHTS } from '../types';
-import { Type, Palette, Layout, ChevronDown, Check, Upload, X, Info, Settings2, Image as ImageIcon, ChevronDown as ScrollArrow } from 'lucide-react';
+import { Type, Palette, Layout, ChevronDown, Check, Upload, X, Info, Settings2, Image as ImageIcon, ChevronDown as ScrollArrow, Smile, Loader2 } from 'lucide-react';
+import EmojiPicker, { Theme, EmojiStyle, SuggestionMode } from 'emoji-picker-react';
 
 interface ConfigPanelProps {
   config: BannerConfig;
@@ -79,6 +80,10 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, isGeneratin
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollHint, setShowScrollHint] = useState(false);
 
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
+
   // Image extraction state
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [extractedColors, setExtractedColors] = useState<string[]>([]);
@@ -126,12 +131,33 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, isGeneratin
       if (fontDropdownRef.current && !fontDropdownRef.current.contains(event.target as Node)) {
         setFontOpen(false);
       }
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
+        setShowEmojiPicker(false);
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, []);
+
+  const insertEmoji = (emoji: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const currentText = config.text;
+    const newText = currentText.substring(0, start) + emoji + currentText.substring(end);
+
+    handleChange('text', newText);
+
+    // Reset focus and cursor position after React update
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + emoji.length, start + emoji.length);
+    }, 0);
+  };
 
   return (
     <div className="h-full flex flex-col w-full bg-[#0F172A] text-slate-300 border-r border-slate-800 shadow-2xl overflow-hidden">
@@ -165,13 +191,47 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, isGeneratin
           <div className="space-y-5">
             <div className="group">
               <label className="text-[11px] font-semibold text-slate-500 mb-1.5 block group-focus-within:text-indigo-400 transition-colors">CONTENT</label>
-              <textarea
-                value={config.text}
-                onChange={(e) => handleChange('text', e.target.value)}
-                rows={2}
-                className="w-full px-3 py-2.5 bg-slate-900/50 border border-slate-700/50 rounded-lg text-slate-200 text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none resize-none placeholder:text-slate-600"
-                placeholder="Enter banner text..."
-              />
+              <div className="relative">
+                <textarea
+                  ref={textareaRef}
+                  value={config.text}
+                  onChange={(e) => handleChange('text', e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2.5 bg-slate-900/50 border border-slate-700/50 rounded-lg text-slate-200 text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-all outline-none resize-none placeholder:text-slate-600 pr-10"
+                  placeholder="Enter banner text..."
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                  className={`absolute right-3 top-2.5 p-1 rounded-md transition-colors ${showEmojiPicker ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+                  title="Insert emoji"
+                >
+                  <Smile className="w-4 h-4" />
+                </button>
+
+                {showEmojiPicker && (
+                  <>
+                    {/* Mobile backdrop */}
+                    <div className="fixed inset-0 bg-black/40 z-[99] md:hidden" onClick={() => setShowEmojiPicker(false)} />
+                    <div
+                      ref={emojiPickerRef}
+                      className="fixed md:absolute top-1/2 left-1/2 md:top-full md:left-auto md:right-0 -translate-x-1/2 -translate-y-1/2 md:translate-x-0 md:translate-y-0 md:mt-2 p-0 bg-[#1E293B] border border-slate-700 rounded-lg shadow-2xl z-[100] animate-in fade-in zoom-in-95 duration-200 overflow-hidden"
+                    >
+                      <EmojiPicker
+                        theme={Theme.DARK}
+                        emojiStyle={EmojiStyle.NATIVE}
+                        onEmojiClick={(emojiData) => insertEmoji(emojiData.emoji)}
+                        lazyLoadEmojis={true}
+                        width={280}
+                        height={350}
+                        previewConfig={{ showPreview: false }}
+                        skinTonesDisabled={true}
+                        searchPlaceholder="Search emoji..."
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
             {/* Custom Font Selector */}

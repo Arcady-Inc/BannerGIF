@@ -21,9 +21,9 @@ const App: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
 
   return (
-    <div className="flex h-screen w-full overflow-hidden font-sans bg-[#0F172A]">
-      {/* Left Sidebar: Fixed Width */}
-      <div className="w-[340px] flex-shrink-0 h-full relative z-30">
+    <div className="flex flex-col md:flex-row h-screen w-full overflow-hidden font-sans bg-[#0F172A]">
+      {/* Left Sidebar: Fixed Width on desktop, collapsible on mobile */}
+      <div className="w-full md:w-[340px] flex-shrink-0 max-h-[45vh] md:max-h-none md:h-full relative z-30 overflow-auto md:overflow-hidden">
         <ConfigPanel
           config={config}
           onChange={setConfig}
@@ -32,7 +32,7 @@ const App: React.FC = () => {
       </div>
 
       {/* Right Content: Fluid */}
-      <div className="flex-1 h-full relative z-10 flex flex-col min-w-0 bg-[#F1F5F9]">
+      <div className="flex-1 min-h-0 relative z-10 flex flex-col min-w-0 bg-[#F1F5F9]">
         <PreviewArea
           config={config}
           setGenerating={setIsGenerating}
