@@ -116,6 +116,22 @@ const extractColorsFromImage = (src: string): Promise<string[]> => {
   });
 };
 
+const AppLogo = () => (
+  <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
+    <rect x="2" y="6" width="32" height="24" rx="6" fill="url(#logo-gradient)" />
+    <rect x="6" y="10" width="24" height="16" rx="3" stroke="white" strokeOpacity="0.2" strokeWidth="1" />
+    <path d="M10 18H26" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
+    <path d="M22 18L19 15M22 18L19 21" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
+    <circle cx="28" cy="8" r="3" fill="#F472B6" stroke="white" strokeWidth="1.5"/>
+    <defs>
+      <linearGradient id="logo-gradient" x1="2" y1="6" x2="34" y2="30" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#DB2777"/>
+        <stop offset="1" stopColor="#9333EA"/>
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
 const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, isGenerating }) => {
   const [fontOpen, setFontOpen] = useState(false);
   const fontDropdownRef = useRef<HTMLDivElement>(null);
@@ -159,11 +175,14 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, isGeneratin
     <div className="h-full overflow-y-auto bg-white border-r border-gray-200 flex flex-col w-full shadow-lg z-20">
       
       {/* Header */}
-      <div className="px-6 py-5 border-b border-gray-100 sticky top-0 bg-white z-10">
-        <h1 className="text-xl font-bold bg-gradient-to-r from-brand-600 to-purple-600 bg-clip-text text-transparent">
-          BannerGIF
-        </h1>
-        <p className="text-xs text-gray-400 font-medium mt-1 uppercase tracking-wide">Studio Editor</p>
+      <div className="px-6 py-6 border-b border-gray-100 sticky top-0 bg-white z-10 flex items-center gap-3">
+        <AppLogo />
+        <div>
+          <h1 className="text-xl font-extrabold bg-gradient-to-r from-brand-600 to-purple-600 bg-clip-text text-transparent leading-none">
+            BannerGIF
+          </h1>
+          <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-0.5">Studio Editor</p>
+        </div>
       </div>
 
       <div className="flex-1 px-6 py-6 space-y-8">
