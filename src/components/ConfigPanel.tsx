@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, Suspense, lazy } from 'react';
 import { BannerConfig, FONTS, FONT_WEIGHTS } from '../types';
-import { Type, Palette, Layout, ChevronDown, Check, Upload, X, Info, Settings2, Image as ImageIcon, ChevronDown as ScrollArrow, Smile, Loader2 } from 'lucide-react';
+import { Type, Palette, Layout, ChevronDown, Check, Upload, X, Info, Settings2, Image as ImageIcon, ChevronDown as ScrollArrow, Smile, Loader2, Search } from 'lucide-react';
 import EmojiPicker, { Theme, EmojiStyle, SuggestionMode } from 'emoji-picker-react';
 
 interface ConfigPanelProps {
@@ -76,6 +76,7 @@ const SectionHeader: React.FC<{ icon: React.ReactNode; title: string }> = ({ ico
 
 const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, isGenerating }) => {
   const [fontOpen, setFontOpen] = useState(false);
+  const [fontSearch, setFontSearch] = useState('');
   const fontDropdownRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollHint, setShowScrollHint] = useState(false);
@@ -130,6 +131,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, isGeneratin
     function handleClickOutside(event: MouseEvent) {
       if (fontDropdownRef.current && !fontDropdownRef.current.contains(event.target as Node)) {
         setFontOpen(false);
+        setFontSearch('');
       }
       if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
         setShowEmojiPicker(false);
@@ -248,22 +250,52 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, isGeneratin
               </button>
 
               {fontOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1.5 bg-[#1E293B] border border-slate-700 rounded-lg shadow-2xl max-h-64 overflow-y-auto z-50 py-1.5 custom-scrollbar">
-                  {FONTS.map((font) => (
-                    <div
-                      key={font.value}
-                      onClick={() => {
-                        handleChange('fontFamily', font.value);
-                        setFontOpen(false);
-                      }}
-                      className={`px-3 py-2 hover:bg-slate-700/50 cursor-pointer flex items-center justify-between group/item ${config.fontFamily === font.value ? 'bg-indigo-500/10' : ''}`}
-                    >
-                      <span style={{ fontFamily: font.value }} className={`text-sm ${config.fontFamily === font.value ? 'text-indigo-400' : 'text-slate-300'} group-hover/item:text-slate-100`}>
-                        {font.name}
-                      </span>
-                      {config.fontFamily === font.value && <Check className="w-3.5 h-3.5 text-indigo-400" />}
+                <div className="absolute top-full left-0 right-0 mt-1.5 bg-[#1E293B] border border-slate-700 rounded-lg shadow-2xl max-h-80 flex flex-col z-50 overflow-hidden">
+                  <div className="p-2 border-b border-slate-700/50 bg-[#1E293B]">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+                      <input
+                        type="text"
+                        value={fontSearch}
+                        onChange={(e) => setFontSearch(e.target.value)}
+                        placeholder="Search fonts..."
+                        autoFocus
+                        className="w-full bg-slate-900/50 border border-slate-700/50 rounded-md py-1.5 pl-8 pr-3 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      {fontSearch && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setFontSearch(''); }}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
-                  ))}
+                  </div>
+                  <div className="flex-1 overflow-y-auto py-1.5 custom-scrollbar">
+                    {FONTS.filter(f => f.name.toLowerCase().includes(fontSearch.toLowerCase())).map((font) => (
+                      <div
+                        key={font.value}
+                        onClick={() => {
+                          handleChange('fontFamily', font.value);
+                          setFontOpen(false);
+                          setFontSearch('');
+                        }}
+                        className={`px-3 py-2 hover:bg-slate-700/50 cursor-pointer flex items-center justify-between group/item ${config.fontFamily === font.value ? 'bg-indigo-500/10' : ''}`}
+                      >
+                        <span style={{ fontFamily: font.value }} className={`text-sm ${config.fontFamily === font.value ? 'text-indigo-400' : 'text-slate-300'} group-hover/item:text-slate-100`}>
+                          {font.name}
+                        </span>
+                        {config.fontFamily === font.value && <Check className="w-3.5 h-3.5 text-indigo-400" />}
+                      </div>
+                    ))}
+                    {FONTS.filter(f => f.name.toLowerCase().includes(fontSearch.toLowerCase())).length === 0 && (
+                      <div className="px-3 py-8 text-center">
+                        <p className="text-xs text-slate-500 italic">No fonts found matching "{fontSearch}"</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
