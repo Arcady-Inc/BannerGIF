@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Reference brand assets (source PDFs, PSDs, raw exports)
+# Production logos live in /public/brand/ inside the repo.
+arcady-branding/
+

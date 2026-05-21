@@ -7,17 +7,18 @@ export default {
     theme: {
         extend: {
             colors: {
-                brand: {
-                    50: '#fdf2f8',
-                    100: '#fce7f3',
-                    200: '#fbcfe8',
-                    300: '#f9a8d4',
-                    400: '#f472b6',
-                    500: '#ec4899',
-                    600: '#db2777',
-                    700: '#be185d',
-                    800: '#9d174d',
-                    900: '#831843',
+                // Arcady brand palette — derived from the cobalt blue mark.
+                arcady: {
+                    50:  '#EEF2FF',
+                    100: '#E0E7FF',
+                    200: '#C7D2FE',
+                    300: '#A5B4FC',
+                    400: '#818CF8',
+                    500: '#4F6FF5',
+                    600: '#3D52C7',
+                    700: '#3B3F99',
+                    800: '#2E3173',
+                    900: '#1E1F4D',
                 },
             },
             fontFamily: {

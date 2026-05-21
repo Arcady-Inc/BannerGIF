@@ -1,71 +1,80 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { BannerConfig } from '../types';
-import { generateBannerGif } from '../utils/gifHelper';
-import { Download, Play, AlertCircle, Loader2, Sparkles, ZoomIn, ZoomOut, Box } from 'lucide-react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { BannerConfig, OutputFormat, OutputMode, STATIC_FORMATS } from '../types';
+import {
+  generateBannerGif,
+  generateStaticImage,
+  drawBannerFrame,
+  estimateOutputSizeKB,
+} from '../utils/gifHelper';
+import {
+  Download,
+  Play,
+  AlertCircle,
+  Loader2,
+  ZoomIn,
+  ZoomOut,
+  FileDown,
+  CheckCircle2,
+} from 'lucide-react';
 
 interface PreviewAreaProps {
   config: BannerConfig;
+  onChange: (next: BannerConfig) => void;
   setGenerating: (val: boolean) => void;
   isGenerating: boolean;
 }
 
-const PreviewArea: React.FC<PreviewAreaProps> = ({ config, setGenerating, isGenerating }) => {
+const PreviewArea: React.FC<PreviewAreaProps> = ({
+  config,
+  onChange,
+  setGenerating,
+  isGenerating,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
+  const [actualKB, setActualKB] = useState<number | null>(null);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
 
-  // Animation loop state
+  // Success toast — appears for 3s after a successful Generate, then fades.
+  const [successToast, setSuccessToast] = useState<string | null>(null);
+  // Pulse animation on the Download button when it newly appears.
+  const [downloadPulse, setDownloadPulse] = useState(false);
+
   const requestRef = useRef<number>(0);
   const startTimeRef = useRef<number>(0);
 
-  const animate = useCallback((time: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  const estimatedKB = useMemo(() => estimateOutputSizeKB(config), [config]);
+  const mode: OutputMode = config.outputFormat === 'gif' ? 'animated' : 'static';
+  const isStatic = mode === 'static';
 
-    if (!startTimeRef.current) startTimeRef.current = time;
+  const animate = useCallback(
+    (time: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    // config.frameDuration is delay per frame.
-    // Loop duration = numFrames * frameDuration
-    const loopDuration = config.frameDuration * config.numFrames;
-    const elapsed = time - startTimeRef.current;
-    const loopProgress = (elapsed % loopDuration) / loopDuration;
+      if (!startTimeRef.current) startTimeRef.current = time;
 
-    // --- DRAWING LOGIC ---
-    if (canvas.width !== config.width) canvas.width = config.width;
-    if (canvas.height !== config.height) canvas.height = config.height;
+      if (canvas.width !== config.width) canvas.width = config.width;
+      if (canvas.height !== config.height) canvas.height = config.height;
 
-    ctx.fillStyle = config.bgColor;
-    ctx.fillRect(0, 0, config.width, config.height);
+      if (isStatic) {
+        drawBannerFrame(ctx, config, 0);
+      } else {
+        const loopDuration = config.frameDuration * config.numFrames;
+        const elapsed = time - startTimeRef.current;
+        const loopProgress = (elapsed % loopDuration) / loopDuration;
+        const currentFrameIndex = Math.floor(loopProgress * config.numFrames);
+        drawBannerFrame(ctx, config, currentFrameIndex);
+      }
 
-    ctx.font = `${config.fontWeight} ${config.fontSize}px ${config.fontFamily}`;
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = config.textColor;
-
-    const measureTxt = config.text || "Mg";
-    const vMetrics = ctx.measureText(measureTxt);
-    const ascent = vMetrics.actualBoundingBoxAscent;
-    const descent = vMetrics.actualBoundingBoxDescent;
-    const yPos = (config.height / 2) + (ascent - descent) / 2;
-
-    const spacingStr = " ".repeat(config.spacing);
-    const fullTextUnit = config.text + spacingStr;
-    const unitMetrics = ctx.measureText(fullTextUnit);
-    const unitWidth = unitMetrics.width;
-
-    const currentFrameIndex = Math.floor(loopProgress * config.numFrames);
-    const offset = -1 * (currentFrameIndex * (unitWidth / config.numFrames));
-
-    const minRepetitions = Math.ceil(config.width / unitWidth) + 2;
-    const textToRender = fullTextUnit.repeat(minRepetitions);
-
-    ctx.fillText(textToRender, offset, yPos);
-
-    requestRef.current = requestAnimationFrame(animate);
-  }, [config]);
+      requestRef.current = requestAnimationFrame(animate);
+    },
+    [config, isStatic]
+  );
 
   useEffect(() => {
     requestRef.current = requestAnimationFrame(animate);
@@ -74,44 +83,87 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({ config, setGenerating, isGene
     };
   }, [animate]);
 
+  // Invalidate cached download when config changes.
+  useEffect(() => {
+    if (generatedUrl) {
+      URL.revokeObjectURL(generatedUrl);
+      setGeneratedUrl(null);
+      setActualKB(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config]);
+
+  // Auto-dismiss the success toast.
+  useEffect(() => {
+    if (!successToast) return;
+    const t = setTimeout(() => setSuccessToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [successToast]);
+
+  // Briefly pulse the download button when it newly appears.
+  useEffect(() => {
+    if (generatedUrl) {
+      setDownloadPulse(true);
+      const t = setTimeout(() => setDownloadPulse(false), 1200);
+      return () => clearTimeout(t);
+    }
+  }, [generatedUrl]);
+
   const handleGenerate = async () => {
     if (!canvasRef.current) return;
 
     setGenerating(true);
     setProgress(0);
     setError(null);
+    setSuccessToast(null);
     setGeneratedUrl(null);
+    setActualKB(null);
 
     try {
-      const blob = await generateBannerGif(config, canvasRef.current, setProgress);
+      const blob = isStatic
+        ? await generateStaticImage(config, canvasRef.current)
+        : await generateBannerGif(config, canvasRef.current, setProgress);
       const url = URL.createObjectURL(blob);
+      const kb = Math.round(blob.size / 1024);
       setGeneratedUrl(url);
-    } catch (err: any) {
+      setActualKB(kb);
+      setSuccessToast(`Ready — ${kb} KB .${config.outputFormat} ready to download`);
+    } catch (err) {
       console.error(err);
-      setError("Failed to generate GIF. Try reducing frames.");
+      setError(`Failed to generate ${config.outputFormat.toUpperCase()}.`);
     } finally {
       setGenerating(false);
     }
   };
 
   const handleDownload = () => {
-    if (generatedUrl) {
-      const a = document.createElement('a');
-      a.href = generatedUrl;
-      const safeName = config.text.replace(/[^a-z0-9]/gi, '-').toLowerCase();
-      a.download = `${safeName || 'banner'}.gif`;
-      a.click();
+    if (!generatedUrl) return;
+    const a = document.createElement('a');
+    a.href = generatedUrl;
+    const safeName = config.text.replace(/[^a-z0-9]/gi, '-').toLowerCase();
+    a.download = `${safeName || 'banner'}.${config.outputFormat}`;
+    a.click();
+  };
+
+  const setMode = (next: OutputMode) => {
+    if (next === 'animated') {
+      onChange({ ...config, outputFormat: 'gif' });
+    } else {
+      // Default static format on first switch: JPEG (first in STATIC_FORMATS).
+      onChange({ ...config, outputFormat: STATIC_FORMATS[0] });
     }
   };
 
+  const setStaticFormat = (fmt: OutputFormat) => onChange({ ...config, outputFormat: fmt });
+
   return (
-    <div className="h-full flex flex-col relative overflow-hidden font-sans bg-[#F1F5F9]"
+    <div
+      className="h-full flex flex-col relative overflow-hidden font-sans bg-[#F1F5F9]"
       style={{
         backgroundImage: 'radial-gradient(#CBD5E1 1px, transparent 1px)',
-        backgroundSize: '20px 20px'
-      }}>
-
-      {/* Workspace */}
+        backgroundSize: '20px 20px',
+      }}
+    >
       <div className="flex-1 overflow-auto flex items-center justify-center relative z-10 custom-scrollbar p-4 sm:p-8 md:p-12">
         <div
           className="relative transition-transform duration-200 ease-out"
@@ -132,64 +184,161 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({ config, setGenerating, isGene
           </div>
         </div>
 
-        {/* Zoom Controls */}
         <div className="absolute bottom-3 left-3 sm:bottom-6 sm:left-6 flex gap-1 bg-white p-1 rounded-lg shadow-lg border border-slate-200">
-          <button onClick={() => setZoom(Math.max(0.2, zoom - 0.1))} className="p-1.5 hover:bg-slate-100 rounded text-slate-500">
+          <button
+            onClick={() => setZoom(Math.max(0.2, zoom - 0.1))}
+            className="p-1.5 hover:bg-slate-100 rounded text-slate-500"
+            aria-label="Zoom out"
+          >
             <ZoomOut className="w-4 h-4" />
           </button>
           <span className="text-xs font-mono font-medium text-slate-600 px-2 py-1.5 min-w-[3rem] text-center">
             {Math.round(zoom * 100)}%
           </span>
-          <button onClick={() => setZoom(Math.min(3, zoom + 0.1))} className="p-1.5 hover:bg-slate-100 rounded text-slate-500">
+          <button
+            onClick={() => setZoom(Math.min(3, zoom + 0.1))}
+            className="p-1.5 hover:bg-slate-100 rounded text-slate-500"
+            aria-label="Zoom in"
+          >
             <ZoomIn className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* Floating Control Bar */}
+      {/* Floating toolbar */}
       <div className="absolute top-3 right-3 sm:top-6 sm:right-6 z-20 max-w-[calc(100%-1.5rem)] sm:max-w-none">
-        <div className="bg-white/90 backdrop-blur-md border border-white/50 p-1.5 sm:p-2 rounded-xl sm:rounded-2xl shadow-xl flex items-center gap-1.5 sm:gap-3 flex-wrap justify-end">
-          {error && (
-            <span className="text-red-500 text-xs font-medium flex items-center px-3 py-1.5 bg-red-50 rounded-xl border border-red-100 animate-in fade-in slide-in-from-right-5">
-              <AlertCircle className="w-3.5 h-3.5 mr-1.5" />
-              {error}
-            </span>
-          )}
-
-          {generatedUrl && (
-            <button
-              onClick={handleDownload}
-              className="flex items-center text-slate-700 hover:text-indigo-600 px-2.5 sm:px-4 py-2 sm:py-2.5 rounded-xl hover:bg-indigo-50/50 transition-all font-semibold text-xs sm:text-sm"
+        <div className="bg-white/90 backdrop-blur-md border border-white/50 p-1.5 sm:p-2 rounded-xl sm:rounded-2xl shadow-xl flex flex-col gap-2">
+          {/* Mode toggle row: Animated / Static */}
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <div
+              className="flex p-0.5 bg-slate-100 rounded-lg"
+              role="tablist"
+              aria-label="Output mode"
             >
-              <Download className="w-4 h-4 mr-2" />
-              Download GIF
-            </button>
-          )}
+              <button
+                role="tab"
+                aria-selected={mode === 'animated'}
+                onClick={() => setMode('animated')}
+                className={`text-[11px] font-bold px-3 py-1.5 rounded-md transition-all ${
+                  mode === 'animated'
+                    ? 'bg-white text-emerald-600 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+                title="Animated GIF — universal email support"
+              >
+                Animated
+              </button>
+              <button
+                role="tab"
+                aria-selected={mode === 'static'}
+                onClick={() => setMode('static')}
+                className={`text-[11px] font-bold px-3 py-1.5 rounded-md transition-all ${
+                  mode === 'static'
+                    ? 'bg-white text-[#4F6FF5] shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+                title="Static image — single frame"
+              >
+                Static
+              </button>
+            </div>
 
-          <button
-            onClick={handleGenerate}
-            disabled={isGenerating}
-            className={`
-                 flex items-center justify-center px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl text-white font-semibold text-xs sm:text-sm shadow-lg shadow-indigo-500/20
-                 transition-all transform hover:-translate-y-0.5 active:translate-y-0 active:scale-95
-                 ${isGenerating
-                ? 'bg-slate-400 cursor-wait'
-                : 'bg-indigo-600 hover:bg-indigo-500 hover:shadow-indigo-500/30'
-              }
-               `}
-          >
-            {isGenerating ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                {progress > 0 ? `${progress}%` : 'Processing...'}
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4 mr-2 fill-current" />
-                Generate
-              </>
+            {/* Static-format sub-toggle (only when Static is selected) */}
+            {isStatic && (
+              <div
+                className="flex p-0.5 bg-slate-100 rounded-lg animate-in fade-in slide-in-from-right-2 duration-200"
+                role="tablist"
+                aria-label="Static format"
+              >
+                {STATIC_FORMATS.map((fmt) => {
+                  const active = config.outputFormat === fmt;
+                  return (
+                    <button
+                      key={fmt}
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => setStaticFormat(fmt)}
+                      className={`text-[10px] font-bold px-2.5 py-1.5 rounded-md transition-all uppercase ${
+                        active
+                          ? 'bg-[#4F6FF5] text-white shadow-sm'
+                          : 'text-slate-500 hover:text-slate-700'
+                      }`}
+                    >
+                      {fmt}
+                    </button>
+                  );
+                })}
+              </div>
             )}
-          </button>
+
+            {/* Live file-size estimate */}
+            <div
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100/80 border border-slate-200/60 text-slate-600"
+              title={actualKB !== null ? 'Actual size of last export' : 'Estimated file size'}
+            >
+              <FileDown className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-[11px] font-mono font-semibold">
+                {actualKB !== null ? `${actualKB} KB` : `~${estimatedKB} KB`}
+              </span>
+            </div>
+
+            {/* Download button (appears after generation) */}
+            {generatedUrl && (
+              <button
+                onClick={handleDownload}
+                className={`flex items-center text-slate-700 hover:text-[#4F6FF5] px-2.5 sm:px-3.5 py-2 sm:py-2.5 rounded-xl hover:bg-blue-50/50 transition-all font-semibold text-xs sm:text-sm ${
+                  downloadPulse ? 'ring-2 ring-[#4F6FF5]/40 animate-pulse' : ''
+                }`}
+              >
+                <Download className="w-4 h-4 mr-1.5" />
+                .{config.outputFormat}
+              </button>
+            )}
+
+            {/* Generate button */}
+            <button
+              onClick={handleGenerate}
+              disabled={isGenerating}
+              className={`flex items-center justify-center px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl text-white font-semibold text-xs sm:text-sm shadow-lg
+                 transition-all transform hover:-translate-y-0.5 active:translate-y-0 active:scale-95
+                 ${
+                   isGenerating
+                     ? 'bg-slate-400 cursor-wait shadow-slate-400/20'
+                     : 'bg-[#4F6FF5] hover:bg-[#3D52C7] shadow-[#4F6FF5]/30 hover:shadow-[#4F6FF5]/40'
+                 }`}
+            >
+              {isGenerating ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  {progress > 0 ? `${progress}%` : 'Processing...'}
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4 mr-2 fill-current" />
+                  Generate
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Feedback row — success or error message, slides in */}
+          {(successToast || error) && (
+            <div
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium animate-in fade-in slide-in-from-top-2 duration-300 ${
+                error
+                  ? 'bg-red-50 text-red-700 border border-red-100'
+                  : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+              }`}
+              role={error ? 'alert' : 'status'}
+            >
+              {error ? (
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+              )}
+              <span>{error || successToast}</span>
+            </div>
+          )}
         </div>
       </div>
     </div>
