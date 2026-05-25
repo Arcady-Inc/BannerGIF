@@ -127,6 +127,14 @@ Drop inline icons next to your text from the **Iconify** library — 200,000+ ic
 </tr>
 </table>
 
+<p align="center">
+  <img src="public/banner-studio-icons-editor.png" width="100%" alt="Icons rendered as inline chips inside the text editor, with the per-icon settings popover open showing color, size, padding, and vertical-offset controls">
+</p>
+
+<p align="center">
+  <em>Icons live inline in the text editor as chips — click any chip below the input to tune its color, size, padding, and vertical offset. The canvas updates instantly and the same chip layout exports to GIF, PNG, WebP, or JPEG.</em>
+</p>
+
 ### Export
 
 Pick between **Animated** and **Static** output. Animated produces a looping GIF; static produces a single-frame image in your choice of format.
