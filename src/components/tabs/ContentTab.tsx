@@ -11,6 +11,7 @@ import {
   AlignCenter,
   AlignRight,
   Repeat,
+  Shapes as IconLib,
 } from 'lucide-react';
 import EmojiPicker, { Theme, EmojiStyle } from 'emoji-picker-react';
 import { BannerConfig, FONTS, FONT_TYPES, FontType } from '../../types';
@@ -24,6 +25,10 @@ import {
   weightsInRange,
 } from '../../utils/customFonts';
 import CustomFontModal from '../CustomFontModal';
+import IconPicker from '../IconPicker';
+import IconChipRow from '../IconChipRow';
+import TextareaWithTokens, { TextareaWithTokensHandle } from '../TextareaWithTokens';
+import { buildIconToken } from '../../utils/iconStore';
 
 interface Props {
   config: BannerConfig;
@@ -45,9 +50,14 @@ const ContentTab: React.FC<Props> = ({
   const [fontTab, setFontTab] = useState<FontTab>('builtin');
   const [showCustomModal, setShowCustomModal] = useState(false);
   const fontDropdownRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Editor handle — exposes focus() + insertAtCursor() for emoji/icon insertion.
+  const editorRef = useRef<TextareaWithTokensHandle | null>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+
+  // Icon picker state
+  const iconButtonRef = useRef<HTMLButtonElement>(null);
+  const [showIconPicker, setShowIconPicker] = useState(false);
 
   // Auto-switch to Custom tab whenever the user adds their first custom font,
   // and back to Built-in if all customs are removed.
@@ -75,16 +85,11 @@ const ContentTab: React.FC<Props> = ({
   }, []);
 
   const insertEmoji = (emoji: string) => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
-    const newText = config.text.substring(0, start) + emoji + config.text.substring(end);
-    set('text', newText);
-    setTimeout(() => {
-      ta.focus();
-      ta.setSelectionRange(start + emoji.length, start + emoji.length);
-    }, 0);
+    editorRef.current?.insertAtCursor(emoji);
+  };
+
+  const insertIcon = (iconId: string) => {
+    editorRef.current?.insertAtCursor(buildIconToken(iconId));
   };
 
   // Unified item shape so both built-in and custom fonts can share the list UI.
@@ -203,26 +208,47 @@ const ContentTab: React.FC<Props> = ({
       <div className="group">
         <Label>Content</Label>
         <div className="relative">
-          <textarea
-            ref={textareaRef}
+          <TextareaWithTokens
             value={config.text}
-            onChange={(e) => set('text', e.target.value)}
-            rows={2}
+            onChange={(v) => set('text', v)}
             placeholder="Enter banner text..."
-            className="w-full px-3 py-2.5 bg-slate-900/50 border border-slate-700/50 rounded-lg text-slate-200 text-sm focus:ring-1 focus:ring-[#4F6FF5] focus:border-[#4F6FF5] transition-all outline-none resize-none placeholder:text-slate-600 pr-10"
+            rows={2}
+            editorRef={editorRef}
           />
-          <button
-            type="button"
-            onClick={() => setShowEmojiPicker((v) => !v)}
-            className={`absolute right-3 top-2.5 p-1 rounded-md transition-colors ${
-              showEmojiPicker
-                ? 'text-[#4F6FF5] bg-[#4F6FF5]/10'
-                : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
-            }`}
-            title="Insert emoji"
-          >
-            <Smile className="w-4 h-4" />
-          </button>
+          {/* Right-edge inline actions: emoji + icon */}
+          <div className="absolute right-2 top-2 flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                setShowIconPicker(false);
+                setShowEmojiPicker((v) => !v);
+              }}
+              className={`p-1 rounded-md transition-colors ${
+                showEmojiPicker
+                  ? 'text-[#4F6FF5] bg-[#4F6FF5]/10'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+              }`}
+              title="Insert emoji"
+            >
+              <Smile className="w-4 h-4" />
+            </button>
+            <button
+              ref={iconButtonRef}
+              type="button"
+              onClick={() => {
+                setShowEmojiPicker(false);
+                setShowIconPicker((v) => !v);
+              }}
+              className={`p-1 rounded-md transition-colors ${
+                showIconPicker
+                  ? 'text-[#4F6FF5] bg-[#4F6FF5]/10'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+              }`}
+              title="Insert icon"
+            >
+              <IconLib className="w-4 h-4" />
+            </button>
+          </div>
 
           {showEmojiPicker && (
             <>
@@ -248,7 +274,20 @@ const ContentTab: React.FC<Props> = ({
               </div>
             </>
           )}
+
+          <IconPicker
+            open={showIconPicker}
+            onClose={() => setShowIconPicker(false)}
+            onPick={(iconId) => {
+              insertIcon(iconId);
+              setShowIconPicker(false);
+            }}
+            anchorRef={iconButtonRef}
+          />
         </div>
+
+        {/* Per-icon chip row — only renders when icons exist in the text */}
+        <IconChipRow config={config} onChange={onChange} />
       </div>
 
       {/* Font family with search */}

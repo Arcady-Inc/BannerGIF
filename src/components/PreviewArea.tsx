@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { BannerConfig, OutputFormat, OutputMode, STATIC_FORMATS } from '../types';
+import { BannerConfig, OutputFormat, OutputMode, STATIC_FORMATS, DEFAULT_ICON_SETTINGS } from '../types';
 import {
   generateBannerGif,
   generateStaticImage,
@@ -7,6 +7,7 @@ import {
   estimateOutputSizeKB,
   measureOutputSizeKB,
 } from '../utils/gifHelper';
+import { preloadIcons, uniqueIconIds } from '../utils/iconStore';
 import {
   Download,
   Play,
@@ -52,8 +53,32 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({
   const mode: OutputMode = config.outputFormat === 'gif' ? 'animated' : 'static';
   const isStatic = mode === 'static';
 
+  // Preload icons referenced by the text. Each (iconId, color) combo gets
+  // fetched from Iconify, cached in IDB, and decoded as an Image — the
+  // renderer reads from that decoded cache synchronously. We bump a counter
+  // when new icons finish loading so the animate loop re-renders with them
+  // instead of showing the placeholder rectangles indefinitely.
+  const [iconReadyTick, setIconReadyTick] = useState(0);
+  useEffect(() => {
+    const ids = uniqueIconIds(config.text);
+    if (ids.length === 0) return;
+    const needs = ids.map((iconId) => {
+      const settings = config.iconSettings[iconId] ?? DEFAULT_ICON_SETTINGS;
+      const color = settings.color === 'inherit' ? config.textColor : settings.color;
+      return { iconId, color };
+    });
+    let cancelled = false;
+    preloadIcons(needs).then(() => {
+      if (!cancelled) setIconReadyTick((t) => t + 1);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.text, config.iconSettings, config.textColor]);
+
   // Frame-sampled measurement — debounced 250ms so we don't run it on
   // every keystroke. Falls back to the heuristic if measurement fails.
+  // Re-runs when iconReadyTick changes so the size reflects newly-loaded icons.
   useEffect(() => {
     setMeasuredKB(null);
     let cancelled = false;
@@ -65,7 +90,7 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [config]);
+  }, [config, iconReadyTick]);
 
   // Display priority: post-generate actual > sampled measurement > heuristic.
   const displayKB = actualKB ?? measuredKB ?? heuristicKB;
@@ -142,6 +167,16 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({
     setActualKB(null);
 
     try {
+      // Make sure every icon used in the banner is fully decoded before we
+      // encode frames — otherwise the GIF would bake placeholder rectangles
+      // where icons should be.
+      const iconNeeds = uniqueIconIds(config.text).map((iconId) => {
+        const settings = config.iconSettings[iconId] ?? DEFAULT_ICON_SETTINGS;
+        const color = settings.color === 'inherit' ? config.textColor : settings.color;
+        return { iconId, color };
+      });
+      if (iconNeeds.length > 0) await preloadIcons(iconNeeds);
+
       const blob = isStatic
         ? await generateStaticImage(config, canvasRef.current)
         : await generateBannerGif(config, canvasRef.current, setProgress);

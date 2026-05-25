@@ -109,6 +109,10 @@ export interface BannerConfig {
   textAlign: 'left' | 'center' | 'right';       // used when repeatText === false
   textOffsetX: number;                          // fine-tune px offset from the aligned position
 
+  // Per-icon settings, keyed by Iconify icon ID (e.g. "material-symbols:home").
+  // Shared by every instance of the same icon in the banner.
+  iconSettings: Record<string, IconSettings>;
+
   // Animation
   frameDuration: number;           // ms per frame
   numFrames: number;
@@ -120,6 +124,24 @@ export interface BannerConfig {
 
 export type OutputFormat = 'gif' | 'jpeg' | 'png' | 'webp';
 export type OutputMode = 'animated' | 'static';
+
+// ----------------------------------------------------------------------------
+// Icon settings — applied per iconId (shared across all instances)
+// ----------------------------------------------------------------------------
+
+export interface IconSettings {
+  color: string;                // hex like '#4F6FF5' OR the literal 'inherit' to use textColor
+  sizePercent: number;          // 100 = match fontSize. range 50..300 in UI.
+  paddingPx: number;            // horizontal breathing room on each side
+  verticalOffsetPx: number;     // nudge up (negative) / down (positive) from the middle-aligned baseline
+}
+
+export const DEFAULT_ICON_SETTINGS: IconSettings = {
+  color: 'inherit',
+  sizePercent: 100,
+  paddingPx: 4,
+  verticalOffsetPx: 0,
+};
 
 // The static formats. Order matters — first is the default when switching to
 // static, and it's the leftmost button in the sub-toggle. PNG comes first
@@ -191,6 +213,8 @@ export const DEFAULT_CONFIG: BannerConfig = {
   repeatText: true,
   textAlign: 'center',
   textOffsetX: 0,
+
+  iconSettings: {},
 
   frameDuration: 100,
   numFrames: 20,

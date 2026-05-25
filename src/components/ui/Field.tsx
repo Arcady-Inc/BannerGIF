@@ -66,6 +66,8 @@ interface SliderFieldProps {
   max: number;
   step?: number;
   suffix?: string;
+  /** Render an editable number input alongside the slider for direct entry. */
+  editable?: boolean;
 }
 
 export const SliderField: React.FC<SliderFieldProps> = ({
@@ -75,6 +77,7 @@ export const SliderField: React.FC<SliderFieldProps> = ({
   max,
   step = 1,
   suffix,
+  editable = false,
 }) => (
   <div className="flex items-center gap-3">
     <input
@@ -86,10 +89,32 @@ export const SliderField: React.FC<SliderFieldProps> = ({
       onChange={(e) => onChange(Number(e.target.value))}
       className="flex-1 h-1.5 bg-slate-700 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#4F6FF5] [&::-webkit-slider-thumb]:shadow-md"
     />
-    <span className="text-[10px] font-mono text-slate-400 w-12 text-right tabular-nums">
-      {value}
-      {suffix}
-    </span>
+    {editable ? (
+      <div className="flex items-center gap-0.5 shrink-0">
+        <input
+          type="number"
+          value={value}
+          min={min}
+          max={max}
+          step={step}
+          onChange={(e) => {
+            const raw = Number(e.target.value);
+            if (!Number.isFinite(raw)) return;
+            // Clamp on change so typing a too-large value snaps to bounds.
+            onChange(Math.max(min, Math.min(max, raw)));
+          }}
+          className="w-12 px-1.5 py-0.5 bg-slate-900/60 border border-slate-700/60 rounded text-slate-200 text-[10px] font-mono text-right focus:border-[#4F6FF5] focus:ring-1 focus:ring-[#4F6FF5] outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        />
+        {suffix && (
+          <span className="text-[10px] font-mono text-slate-500 w-3">{suffix}</span>
+        )}
+      </div>
+    ) : (
+      <span className="text-[10px] font-mono text-slate-400 w-12 text-right tabular-nums">
+        {value}
+        {suffix}
+      </span>
+    )}
   </div>
 );
 

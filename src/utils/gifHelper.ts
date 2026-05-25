@@ -1,5 +1,6 @@
-import { BannerConfig, BannerShape, ShapeOptions, TextureOptions } from '../types';
+import { BannerConfig, BannerShape, IconSettings, ShapeOptions, TextureOptions, DEFAULT_ICON_SETTINGS } from '../types';
 import { quoteFontFamily } from './customFonts';
+import { getIconImageSync, parseSegments, Segment } from './iconStore';
 
 declare class GIF {
   constructor(options: any);
@@ -412,6 +413,119 @@ const buildBackgroundFill = (
 };
 
 // ============================================================================
+// Segment measurement + drawing
+//
+// Banner text can contain inline icon tokens (e.g. `{{icon:mdi:home}}`). We
+// parse the text into segments (alternating text + icon) and measure/draw
+// each in sequence, advancing an X cursor. The marquee unit is the full
+// segment list rendered once.
+// ============================================================================
+
+interface SegmentMetrics {
+  width: number;        // total horizontal advance, including icon padding
+  height: number;       // for icons: rendered pixel height
+}
+
+const getIconSettings = (
+  iconId: string,
+  config: BannerConfig
+): IconSettings => config.iconSettings[iconId] ?? DEFAULT_ICON_SETTINGS;
+
+const resolveIconColor = (settings: IconSettings, config: BannerConfig): string =>
+  settings.color === 'inherit' ? config.textColor : settings.color;
+
+/** Measure one segment without drawing. Mutates nothing. */
+const measureSegment = (
+  ctx: CanvasRenderingContext2D,
+  seg: Segment,
+  config: BannerConfig
+): SegmentMetrics => {
+  if (seg.type === 'text') {
+    return {
+      width: ctx.measureText(seg.value).width,
+      height: config.fontSize,
+    };
+  }
+  // Icon segment — width = height * intrinsic-aspect (we treat all icons as
+  // square for layout; non-square Iconify icons get drawn at their natural
+  // aspect inside the square box, which is what most users expect).
+  const settings = getIconSettings(seg.iconId, config);
+  const iconHeight = (config.fontSize * settings.sizePercent) / 100;
+  // Use square footprint for layout — Iconify icons are overwhelmingly square,
+  // and predictable spacing matters more than perfect tight-bounding for the
+  // odd non-square logo.
+  return {
+    width: iconHeight + settings.paddingPx * 2,
+    height: iconHeight,
+  };
+};
+
+/** Total width of a list of segments. */
+const totalSegmentsWidth = (
+  ctx: CanvasRenderingContext2D,
+  segments: Segment[],
+  config: BannerConfig
+): number => segments.reduce((acc, s) => acc + measureSegment(ctx, s, config).width, 0);
+
+/**
+ * Draw a single segment at (x, baselineY). Returns the new X cursor after the
+ * segment is drawn. Caller is responsible for setting ctx.font, fillStyle,
+ * and any text effects (shadow, stroke) before invoking.
+ */
+const drawSegment = (
+  ctx: CanvasRenderingContext2D,
+  seg: Segment,
+  x: number,
+  baselineY: number,
+  config: BannerConfig,
+  // When drawing text, the caller may have already set ctx.fillStyle for the
+  // fill pass and previously stroked. Icons need their own fillStyle (their
+  // color comes from iconSettings), so we restore on exit.
+  textFill: boolean
+): number => {
+  if (seg.type === 'text') {
+    if (textFill) ctx.fillText(seg.value, x, baselineY);
+    const w = ctx.measureText(seg.value).width;
+    return x + w;
+  }
+
+  const settings = getIconSettings(seg.iconId, config);
+  const color = resolveIconColor(settings, config);
+  const iconHeight = (config.fontSize * settings.sizePercent) / 100;
+  const iconWidth = iconHeight;
+
+  // Middle-align the icon on the text's x-height by default; user can nudge
+  // up (negative) or down (positive) via verticalOffsetPx.
+  //
+  // For the alphabetic baseline, the visual middle of capital letters sits
+  // roughly `cap-height/2` above the baseline. We approximate cap-height as
+  // 0.7 × fontSize (standard heuristic), so the text-visual-center is at
+  // `baselineY - fontSize * 0.35`. Placing the icon so ITS center hits that
+  // point means iconY = (text-visual-center) - iconHeight/2.
+  const textVisualCenter = baselineY - config.fontSize * 0.35;
+  const iconY = textVisualCenter - iconHeight / 2 + settings.verticalOffsetPx;
+
+  if (textFill) {
+    const img = getIconImageSync(seg.iconId, color);
+    if (img) {
+      ctx.drawImage(img, x + settings.paddingPx, iconY, iconWidth, iconHeight);
+    } else {
+      // Placeholder while the icon is still decoding. Use the icon's own
+      // color (or text color) so the placeholder is visible on the user's
+      // banner background, not just on dark slate.
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.35;
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x + settings.paddingPx, iconY, iconWidth, iconHeight);
+      ctx.restore();
+    }
+  }
+  return x + iconWidth + settings.paddingPx * 2;
+};
+
+// ============================================================================
 // Per-frame paint (shared by preview + encoder)
 // ============================================================================
 
@@ -500,76 +614,112 @@ export const drawBannerFrame = (
   const descent = vMetrics.actualBoundingBoxDescent;
   const yPos = height / 2 + (ascent - descent) / 2;
 
-  // Build the string to draw + its X position depending on layout mode:
-  //
-  //   - repeatText === true: classic marquee. Text repeated to fill the canvas
-  //     + one extra unit of slack for seamless wrap. X cycles by `unitWidth /
-  //     numFrames` per frame in animated mode (perfect loop), or stays at 0
-  //     in static mode (with a tiny leading-space pad so it doesn't sit flush
-  //     against the left edge).
-  //
-  //   - repeatText === false: single instance, aligned to left/center/right
-  //     with an optional pixel offset. No motion regardless of format.
-  let textToRender: string;
-  let offset: number;
+  // Parse the user's text into [text|icon|text|...] segments. Each marquee
+  // "unit" is one pass through the segment list (plus trailing spacing).
+  const baseSegments = parseSegments(text);
+  const spacingTail: Segment[] = config.repeatText && spacing > 0
+    ? [{ type: 'text', value: ' '.repeat(spacing) }]
+    : [];
+  const unitSegments: Segment[] = [...baseSegments, ...spacingTail];
 
+  // Total width of one marquee unit (text widths via measureText, icon
+  // widths derived from fontSize × sizePercent + padding).
+  const unitWidth = totalSegmentsWidth(ctx, unitSegments, config);
+
+  // Compute X origin for the leftmost unit.
+  //
+  //   repeatText:
+  //     animated → start at offset that cycles through one unitWidth across
+  //                numFrames for a perfect loop.
+  //     static   → start at 0 (tiny pad already absorbed by spacingTail).
+  //   non-repeated:
+  //     start at aligned position (textAlign + textOffsetX).
+  let originX: number;
   if (config.repeatText) {
-    const spacingStr = ' '.repeat(spacing);
-    const fullTextUnit = text + spacingStr;
-    const unitMetrics = ctx.measureText(fullTextUnit);
-    const unitWidth = unitMetrics.width;
-    const minRepetitions = Math.ceil(width / Math.max(1, unitWidth)) + 2;
-
     const isStaticOutput = config.outputFormat !== 'gif';
-    const staticLeftPad = isStaticOutput ? (spacing >= 8 ? '  ' : ' ') : '';
-    textToRender = staticLeftPad + fullTextUnit.repeat(minRepetitions);
-
-    offset = isStaticOutput
-      ? 0
-      : -1 * (frameIndex * (unitWidth / config.numFrames));
+    const staticLeftPad = isStaticOutput && spacing < 8 ? config.fontSize * 0.25 : 0;
+    originX = isStaticOutput
+      ? staticLeftPad
+      : -1 * (frameIndex * (unitWidth / Math.max(1, config.numFrames)));
   } else {
-    textToRender = text;
-    const singleWidth = ctx.measureText(text).width;
     switch (config.textAlign) {
       case 'left':
-        offset = 0 + config.textOffsetX;
+        originX = 0 + config.textOffsetX;
         break;
       case 'right':
-        offset = width - singleWidth + config.textOffsetX;
+        originX = width - unitWidth + config.textOffsetX;
         break;
       case 'center':
       default:
-        offset = (width - singleWidth) / 2 + config.textOffsetX;
+        originX = (width - unitWidth) / 2 + config.textOffsetX;
         break;
     }
   }
 
-  // --- 6. Drop shadow (applies to both stroke and fill) ---------------------
-  if (config.shadowEnabled) {
-    ctx.shadowColor = config.shadowColor;
-    ctx.shadowBlur = config.shadowBlur;
-    ctx.shadowOffsetX = config.shadowOffsetX;
-    ctx.shadowOffsetY = config.shadowOffsetY;
-  }
+  // --- 6. Render passes ----------------------------------------------------
+  //
+  // Each marquee unit is drawn in three passes when stroke or shadow is on:
+  //   1. Shadow pass (only if stroke is OFF and shadow ON) — draws once
+  //      per segment, so the shadow lands behind every glyph + icon.
+  //   2. Stroke pass — strokes text only (icons can't be stroked the same
+  //      way; we leave their internal artwork alone).
+  //   3. Fill pass — text fillText, icon drawImage.
+  //
+  // The stroke + fill split is the same trick as before: stroking after
+  // filling would clip half the stroke into the glyph; stroking first then
+  // filling on top gives clean outlined letters.
 
-  // --- 7. Text stroke (drawn first so fill sits on top) ---------------------
-  if (config.strokeWidth > 0) {
-    ctx.lineWidth = config.strokeWidth * 2; // half is clipped by fill on top
-    ctx.strokeStyle = config.strokeColor;
-    ctx.lineJoin = 'round';
-    ctx.miterLimit = 2;
-    ctx.strokeText(textToRender, offset, yPos);
-    // Disable shadow before the fill — otherwise the fill's shadow stacks
-    // on top of the stroke's shadow, producing a visible halo.
-    ctx.shadowColor = 'transparent';
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
-  }
+  const drawOneUnit = (unitOriginX: number) => {
+    // Shadow + fill pass for both text and icons. Done together so the
+    // shadow applies uniformly to everything inside the unit.
+    if (config.shadowEnabled) {
+      ctx.shadowColor = config.shadowColor;
+      ctx.shadowBlur = config.shadowBlur;
+      ctx.shadowOffsetX = config.shadowOffsetX;
+      ctx.shadowOffsetY = config.shadowOffsetY;
+    }
 
-  // --- 8. Text fill --------------------------------------------------------
-  ctx.fillStyle = config.textColor;
-  ctx.fillText(textToRender, offset, yPos);
+    // Stroke pass (text only).
+    if (config.strokeWidth > 0) {
+      ctx.lineWidth = config.strokeWidth * 2;
+      ctx.strokeStyle = config.strokeColor;
+      ctx.lineJoin = 'round';
+      ctx.miterLimit = 2;
+      let x = unitOriginX;
+      for (const seg of unitSegments) {
+        if (seg.type === 'text') {
+          ctx.strokeText(seg.value, x, yPos);
+        }
+        // Always advance cursor by the segment's full width — drawing or not.
+        x += measureSegment(ctx, seg, config).width;
+      }
+      // Disable shadow before the fill pass — otherwise it stacks on top
+      // of the stroke shadow as a visible halo.
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+    }
+
+    // Fill pass — text fill + icon draw.
+    ctx.fillStyle = config.textColor;
+    let cursorX = unitOriginX;
+    for (const seg of unitSegments) {
+      cursorX = drawSegment(ctx, seg, cursorX, yPos, config, true);
+    }
+  };
+
+  if (config.repeatText) {
+    // Wrap the segment list horizontally to fill the canvas + one unit of
+    // slack on each side for seamless edge cases when stroke/shadow extends
+    // past the unit's bounding box.
+    const repetitions = Math.ceil(width / Math.max(1, unitWidth)) + 2;
+    for (let i = 0; i < repetitions; i++) {
+      drawOneUnit(originX + i * unitWidth);
+    }
+  } else {
+    drawOneUnit(originX);
+  }
 
   ctx.restore();
 };
