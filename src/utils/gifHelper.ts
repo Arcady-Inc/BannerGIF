@@ -500,24 +500,49 @@ export const drawBannerFrame = (
   const descent = vMetrics.actualBoundingBoxDescent;
   const yPos = height / 2 + (ascent - descent) / 2;
 
-  const spacingStr = ' '.repeat(spacing);
-  const fullTextUnit = text + spacingStr;
-  const unitMetrics = ctx.measureText(fullTextUnit);
-  const unitWidth = unitMetrics.width;
-  const minRepetitions = Math.ceil(width / Math.max(1, unitWidth)) + 2;
+  // Build the string to draw + its X position depending on layout mode:
+  //
+  //   - repeatText === true: classic marquee. Text repeated to fill the canvas
+  //     + one extra unit of slack for seamless wrap. X cycles by `unitWidth /
+  //     numFrames` per frame in animated mode (perfect loop), or stays at 0
+  //     in static mode (with a tiny leading-space pad so it doesn't sit flush
+  //     against the left edge).
+  //
+  //   - repeatText === false: single instance, aligned to left/center/right
+  //     with an optional pixel offset. No motion regardless of format.
+  let textToRender: string;
+  let offset: number;
 
-  // In static modes, prepend a tiny left-pad so the first repetition isn't
-  // flush against the canvas edge. One space is usually enough; with very wide
-  // spacing settings we allow a second.
-  const isStaticOutput = config.outputFormat !== 'gif';
-  const staticLeftPad = isStaticOutput ? (spacing >= 8 ? '  ' : ' ') : '';
-  const textToRender = staticLeftPad + fullTextUnit.repeat(minRepetitions);
+  if (config.repeatText) {
+    const spacingStr = ' '.repeat(spacing);
+    const fullTextUnit = text + spacingStr;
+    const unitMetrics = ctx.measureText(fullTextUnit);
+    const unitWidth = unitMetrics.width;
+    const minRepetitions = Math.ceil(width / Math.max(1, unitWidth)) + 2;
 
-  // Animated: offset cycles through one unitWidth across numFrames for a perfect loop.
-  // Static: no offset (we already padded with leading whitespace).
-  const offset = isStaticOutput
-    ? 0
-    : -1 * (frameIndex * (unitWidth / config.numFrames));
+    const isStaticOutput = config.outputFormat !== 'gif';
+    const staticLeftPad = isStaticOutput ? (spacing >= 8 ? '  ' : ' ') : '';
+    textToRender = staticLeftPad + fullTextUnit.repeat(minRepetitions);
+
+    offset = isStaticOutput
+      ? 0
+      : -1 * (frameIndex * (unitWidth / config.numFrames));
+  } else {
+    textToRender = text;
+    const singleWidth = ctx.measureText(text).width;
+    switch (config.textAlign) {
+      case 'left':
+        offset = 0 + config.textOffsetX;
+        break;
+      case 'right':
+        offset = width - singleWidth + config.textOffsetX;
+        break;
+      case 'center':
+      default:
+        offset = (width - singleWidth) / 2 + config.textOffsetX;
+        break;
+    }
+  }
 
   // --- 6. Drop shadow (applies to both stroke and fill) ---------------------
   if (config.shadowEnabled) {

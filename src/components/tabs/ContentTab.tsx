@@ -1,8 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Check, Smile, Search, X, Plus, Trash2 } from 'lucide-react';
+import {
+  ChevronDown,
+  Check,
+  Smile,
+  Search,
+  X,
+  Plus,
+  Trash2,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Repeat,
+} from 'lucide-react';
 import EmojiPicker, { Theme, EmojiStyle } from 'emoji-picker-react';
 import { BannerConfig, FONTS, FONT_TYPES, FontType } from '../../types';
-import { Label, NumberField, SliderField, Divider } from '../ui/Field';
+import { Label, NumberField, SliderField, Divider, Toggle } from '../ui/Field';
 import {
   CustomFont,
   defaultVariant,
@@ -424,18 +436,118 @@ const ContentTab: React.FC<Props> = ({
 
       <Divider />
 
-      {/* Spacing */}
-      <div>
-        <div className="flex justify-between mb-1.5">
-          <Label>Repeat Spacing</Label>
-          <span className="text-[10px] text-slate-500">{config.spacing}</span>
+      {/* Layout — repeat / align / offset */}
+      <div className="bg-slate-900/30 border border-slate-800/60 rounded-xl p-3 space-y-3">
+        <div className="flex items-center gap-2">
+          <Repeat className="w-3.5 h-3.5 text-slate-400" />
+          <div className="flex-1">
+            <Toggle
+              label="Repeat text (scrolling marquee)"
+              checked={config.repeatText}
+              onChange={(v) => set('repeatText', v)}
+            />
+          </div>
         </div>
-        <SliderField
-          value={config.spacing}
-          onChange={(v) => set('spacing', v)}
-          min={0}
-          max={20}
-        />
+
+        {config.repeatText ? (
+          /* Marquee mode — spacing between repeated text units */
+          <div>
+            <div className="flex justify-between mb-1.5">
+              <Label>Repeat Spacing</Label>
+              <span className="text-[10px] text-slate-500">{config.spacing}</span>
+            </div>
+            <SliderField
+              value={config.spacing}
+              onChange={(v) => set('spacing', v)}
+              min={0}
+              max={20}
+            />
+          </div>
+        ) : (
+          /* Single-instance mode — alignment + fine offset.
+             Alignment + offset compose mathematically (final X = aligned +
+             offset), but visually they're mutually exclusive: an offset of
+             0 means "purely aligned", any non-zero offset means "custom
+             position". So we deselect all alignment buttons when offsetX
+             ≠ 0, and reset offset to 0 when the user picks an alignment. */
+          <>
+            {(() => {
+              const hasOffset = config.textOffsetX !== 0;
+              const halfWidth = Math.floor(config.width / 2);
+              return (
+                <>
+                  <div>
+                    <Label>Align</Label>
+                    <div className="grid grid-cols-3 gap-1 bg-slate-900/50 border border-slate-700/50 p-1 rounded-lg">
+                      {(
+                        [
+                          { value: 'left', icon: AlignLeft, label: 'Left' },
+                          { value: 'center', icon: AlignCenter, label: 'Center' },
+                          { value: 'right', icon: AlignRight, label: 'Right' },
+                        ] as const
+                      ).map((opt) => {
+                        const Active = opt.icon;
+                        const active = !hasOffset && config.textAlign === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() =>
+                              onChange({
+                                ...config,
+                                textAlign: opt.value,
+                                textOffsetX: 0,
+                              })
+                            }
+                            title={opt.label}
+                            aria-pressed={active}
+                            className={`flex items-center justify-center py-1.5 rounded-md transition-all ${
+                              active
+                                ? 'bg-[#4F6FF5] text-white shadow-md shadow-[#4F6FF5]/20'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                            }`}
+                          >
+                            <Active className="w-4 h-4" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1.5 gap-2">
+                      <Label>Offset X</Label>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          value={config.textOffsetX}
+                          onChange={(e) => {
+                            const raw = Number(e.target.value);
+                            if (!Number.isFinite(raw)) return;
+                            const clamped = Math.max(
+                              -halfWidth,
+                              Math.min(halfWidth, Math.round(raw))
+                            );
+                            set('textOffsetX', clamped);
+                          }}
+                          className="w-14 px-1.5 py-0.5 bg-slate-900/50 border border-slate-700/50 rounded text-slate-200 text-[10px] font-mono text-right focus:border-[#4F6FF5] focus:ring-1 focus:ring-[#4F6FF5] outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        />
+                        <span className="text-[10px] text-slate-500">px</span>
+                      </div>
+                    </div>
+                    <SliderField
+                      value={config.textOffsetX}
+                      onChange={(v) => set('textOffsetX', v)}
+                      min={-halfWidth}
+                      max={halfWidth}
+                      suffix="px"
+                    />
+                  </div>
+                </>
+              );
+            })()}
+          </>
+        )}
       </div>
     </div>
   );

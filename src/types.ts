@@ -104,10 +104,15 @@ export interface BannerConfig {
   outsideColor: string;            // color of pixels OUTSIDE the shape
   outsideTransparent: boolean;     // if true, render as GIF transparent
 
+  // Text layout
+  repeatText: boolean;                          // false = single text, aligned; true = scrolling marquee
+  textAlign: 'left' | 'center' | 'right';       // used when repeatText === false
+  textOffsetX: number;                          // fine-tune px offset from the aligned position
+
   // Animation
   frameDuration: number;           // ms per frame
   numFrames: number;
-  spacing: number;                 // spaces between repeated text
+  spacing: number;                 // spaces between repeated text (used only when repeatText is true)
 
   // Output format — 'gif' is animated, 'png' & 'webp' are static single-frame
   outputFormat: OutputFormat;
@@ -182,6 +187,10 @@ export const DEFAULT_CONFIG: BannerConfig = {
   },
   outsideColor: '#F1F5F9',
   outsideTransparent: true,
+
+  repeatText: true,
+  textAlign: 'center',
+  textOffsetX: 0,
 
   frameDuration: 100,
   numFrames: 20,
