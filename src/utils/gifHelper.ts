@@ -1,4 +1,5 @@
 import { BannerConfig, BannerShape, ShapeOptions, TextureOptions } from '../types';
+import { quoteFontFamily } from './customFonts';
 
 declare class GIF {
   constructor(options: any);
@@ -414,23 +415,57 @@ const buildBackgroundFill = (
 // Per-frame paint (shared by preview + encoder)
 // ============================================================================
 
+/**
+ * Optional render-time context.
+ *
+ * The "outside the shape" area is rendered differently depending on what we're
+ * about to do with the canvas:
+ *
+ *   - Preview (forEncode=false):
+ *       Clear to alpha=0 when outsideTransparent — the workspace shows a
+ *       checkerboard behind the canvas, so transparency is visible.
+ *
+ *   - GIF encode (forEncode=true, format='gif'):
+ *       PAINT outsideColor. gif.js reads back canvas pixels and looks for the
+ *       configured color in the quantized palette to mark as transparent.
+ *
+ *   - PNG / WebP encode (forEncode=true, format='png'|'webp'):
+ *       Clear to alpha=0. canvas.toBlob() preserves alpha; format supports it.
+ *
+ *   - JPEG encode (forEncode=true, format='jpeg'):
+ *       PAINT outsideColor. JPEG has no alpha channel — clearing would let
+ *       toBlob composite the transparent pixels onto an implementation-defined
+ *       background (often black). Painting gives a deterministic result.
+ */
+interface DrawOptions {
+  forEncode?: boolean;
+}
+
+const shouldPaintOutside = (config: BannerConfig, forEncode: boolean): boolean => {
+  if (!config.outsideTransparent) return true;
+  if (!forEncode) return false;
+  return config.outputFormat === 'gif' || config.outputFormat === 'jpeg';
+};
+
 export const drawBannerFrame = (
   ctx: CanvasRenderingContext2D,
   config: BannerConfig,
-  frameIndex: number
+  frameIndex: number,
+  options: DrawOptions = {}
 ): void => {
   const { width, height, text, spacing, shape, shapeOptions } = config;
+  const forEncode = options.forEncode ?? false;
 
-  // --- 1. Paint outside-shape area first (so it shows around shape edges) ---
+  // --- 1. Outside-shape area --------------------------------------------------
+  // Always start from a known state — either filled with outsideColor or
+  // explicitly cleared to alpha=0. See shouldPaintOutside() for the matrix.
   ctx.save();
-  if (config.outsideTransparent) {
-    // Use the configured transparent color marker for gif.js. The preview
-    // can't render alpha but the export will treat this color as transparent.
+  if (shouldPaintOutside(config, forEncode)) {
     ctx.fillStyle = config.outsideColor;
+    ctx.fillRect(0, 0, width, height);
   } else {
-    ctx.fillStyle = config.outsideColor;
+    ctx.clearRect(0, 0, width, height);
   }
-  ctx.fillRect(0, 0, width, height);
   ctx.restore();
 
   // --- 2. Clip to the configured shape ------------------------------------
@@ -448,7 +483,12 @@ export const drawBannerFrame = (
   paintTexture(ctx, config.texture, width, height);
 
   // --- 5. Text setup --------------------------------------------------------
-  const fontStr = `${config.fontWeight} ${config.fontSize}px ${config.fontFamily}`;
+  // CSS font shorthand order: [style] [weight] size family
+  // Family MUST be quoted when it contains anything outside [A-Za-z0-9-];
+  // otherwise canvas silently ignores the assignment and keeps drawing in
+  // its default `10px sans-serif`.
+  const stylePart = config.fontStyle === 'italic' ? 'italic ' : '';
+  const fontStr = `${stylePart}${config.fontWeight} ${config.fontSize}px ${quoteFontFamily(config.fontFamily)}`;
   ctx.font = fontStr;
   ctx.textBaseline = 'alphabetic';
   ctx.imageSmoothingEnabled = true;
@@ -554,7 +594,7 @@ export const generateBannerGif = async (
       if (canvas.height !== config.height) canvas.height = config.height;
 
       for (let i = 0; i < config.numFrames; i++) {
-        drawBannerFrame(ctx, config, i);
+        drawBannerFrame(ctx, config, i, { forEncode: true });
         gif.addFrame(ctx, { copy: true, delay: config.frameDuration });
       }
 
@@ -597,12 +637,14 @@ export const generateStaticImage = (
   if (canvas.width !== config.width) canvas.width = config.width;
   if (canvas.height !== config.height) canvas.height = config.height;
 
-  // Render frame 0 — the "starting position" of the marquee.
-  drawBannerFrame(ctx, config, 0);
-
   if (config.outputFormat === 'gif') {
     return Promise.reject(new Error('generateStaticImage called with gif format'));
   }
+
+  // Render frame 0 — the "starting position" of the marquee. For PNG/WebP
+  // with outsideTransparent, this leaves the outside area at alpha=0; toBlob
+  // preserves that into the output.
+  drawBannerFrame(ctx, config, 0, { forEncode: true });
 
   const info = STATIC_FORMAT_INFO[config.outputFormat];
 
@@ -621,51 +663,139 @@ export const generateStaticImage = (
 // ============================================================================
 // Size estimate
 // ============================================================================
+//
+// These are deliberately conservative-low — overestimating is worse than
+// underestimating for our audience (email deliverability anxiety). After the
+// first real export, PreviewArea displays the actual size instead, so any
+// estimate-vs-reality drift self-corrects per session.
+//
+// All numbers were rough-calibrated against typical scrolling-text banners
+// (700×50–1500×100, flat-ish backgrounds). Expect ±40% error on edge cases.
 
 export const estimateOutputSizeKB = (config: BannerConfig): number => {
   const pixels = config.width * config.height;
 
-  // For static formats, we encode a single frame.
   if (config.outputFormat === 'png') {
-    // PNG is lossless. Flat banners compress well via zlib.
-    let bpp = 0.4;
-    if (config.bgType === 'gradient') bpp += 0.2;
-    if (config.texture.type !== 'none') bpp += 0.3;
-    if (config.texture.type === 'noise') bpp += 0.5;
-    if (config.shadowEnabled) bpp += 0.15;
-    return Math.max(1, Math.round((pixels * bpp) / 1024));
+    // PNG is lossless with zlib. Flat text on flat bg compresses very well.
+    // Baseline ~0.2 bpp for default content; effects raise the entropy bill.
+    let bpp = 0.2;
+    if (config.bgType === 'gradient') bpp += 0.15;
+    if (config.texture.type !== 'none') bpp += 0.2;
+    if (config.texture.type === 'noise') bpp += 0.4;
+    if (config.shadowEnabled) bpp += 0.1;
+    return Math.max(1, Math.round((pixels * bpp) / 1024) + 1);
   }
 
   if (config.outputFormat === 'webp') {
-    // WebP @ q=0.92 is typically 30–50% smaller than PNG for this content.
-    let bpp = 0.22;
-    if (config.bgType === 'gradient') bpp += 0.08;
-    if (config.texture.type !== 'none') bpp += 0.12;
-    if (config.texture.type === 'noise') bpp += 0.25;
-    if (config.shadowEnabled) bpp += 0.08;
-    return Math.max(1, Math.round((pixels * bpp) / 1024));
+    // WebP @ q=0.92 ~30–50% smaller than PNG for our content.
+    let bpp = 0.12;
+    if (config.bgType === 'gradient') bpp += 0.06;
+    if (config.texture.type !== 'none') bpp += 0.08;
+    if (config.texture.type === 'noise') bpp += 0.2;
+    if (config.shadowEnabled) bpp += 0.05;
+    return Math.max(1, Math.round((pixels * bpp) / 1024) + 1);
   }
 
   if (config.outputFormat === 'jpeg') {
-    // JPEG @ q=0.92 is typically a touch larger than WebP but smaller than PNG.
-    // Note: JPEG flattens transparency onto a white background.
-    let bpp = 0.3;
-    if (config.bgType === 'gradient') bpp += 0.1;
-    if (config.texture.type !== 'none') bpp += 0.18;
-    if (config.texture.type === 'noise') bpp += 0.35;
-    if (config.shadowEnabled) bpp += 0.1;
-    return Math.max(1, Math.round((pixels * bpp) / 1024));
+    // JPEG @ q=0.92 sits between WebP and PNG for our content.
+    // (JPEG flattens any transparency onto white.)
+    let bpp = 0.18;
+    if (config.bgType === 'gradient') bpp += 0.08;
+    if (config.texture.type !== 'none') bpp += 0.14;
+    if (config.texture.type === 'noise') bpp += 0.28;
+    if (config.shadowEnabled) bpp += 0.07;
+    return Math.max(1, Math.round((pixels * bpp) / 1024) + 1);
   }
 
-  // GIF: animated, all frames.
-  let bytesPerPixelPerFrame = 0.06;
-  if (config.bgType === 'gradient') bytesPerPixelPerFrame += 0.04;
-  if (config.strokeWidth > 0) bytesPerPixelPerFrame += 0.02;
-  if (config.shadowEnabled) bytesPerPixelPerFrame += 0.03;
-  if (config.texture.type !== 'none') bytesPerPixelPerFrame += 0.05;
-  if (config.texture.type === 'noise') bytesPerPixelPerFrame += 0.1;
-  if (config.shape !== 'rectangle') bytesPerPixelPerFrame += 0.01;
-  const bytes = pixels * config.numFrames * bytesPerPixelPerFrame;
-  return Math.max(2, Math.round(bytes / 1024));
+  // GIF: indexed-palette LZW across all frames. Default settings
+  // (quality=20, dither=false) target compact output for flat content.
+  //
+  // For a horizontally-scrolling marquee, EVERY pixel shifts each frame,
+  // so gif.js's inter-frame delta detection gives little benefit. Each
+  // frame ends up as essentially a fresh LZW block, but at very low bpp
+  // because the palette is tiny (often <8 colors for flat text).
+  let bytesPerPixelPerFrame = 0.035;
+  if (config.bgType === 'gradient') bytesPerPixelPerFrame += 0.05;
+  if (config.strokeWidth > 0) bytesPerPixelPerFrame += 0.01;
+  if (config.shadowEnabled) bytesPerPixelPerFrame += 0.04;
+  if (config.texture.type !== 'none') bytesPerPixelPerFrame += 0.04;
+  if (config.texture.type === 'noise') bytesPerPixelPerFrame += 0.18;
+  // Non-rect shapes barely affect file size — the palette is what matters.
+  const bodyBytes = pixels * config.numFrames * bytesPerPixelPerFrame;
+  const headerOverhead = 800; // GIF89a header + GCT + extension blocks
+  return Math.max(2, Math.round((bodyBytes + headerOverhead) / 1024));
+};
+
+// ----------------------------------------------------------------------------
+// Frame-sampled measurement — runs the real encoder on a couple of frames
+// and extrapolates. ~10-30ms on a default-sized banner, much more accurate
+// than the static heuristic above.
+//
+// Strategy per format:
+//
+//   - Static (PNG / WebP / JPEG): just encode frame 0 in the target format.
+//     One toBlob call. The result *is* the exact final size.
+//
+//   - GIF: encode frame 0, the middle frame, and the last frame as PNG.
+//     PNG isn't GIF, but PNG-bytes-per-frame correlates well with
+//     GIF-bytes-per-frame for our content (small palette, flat-ish bg).
+//     Apply an empirical ratio (~0.5 for flat banners, higher for noise).
+//
+// The estimate function above remains as instant fallback while measurement
+// is in flight. ----------------------------------------------------------------------------
+
+const PNG_TO_GIF_RATIO_BY_TEXTURE: Record<string, number> = {
+  none: 0.5,
+  stripes: 0.55,
+  dots: 0.55,
+  grid: 0.55,
+  checker: 0.55,
+  crosshatch: 0.6,
+  plus: 0.6,
+  triangles: 0.6,
+  noise: 0.8, // noise hurts both, but more for PNG than GIF
+};
+
+export const measureOutputSizeKB = async (config: BannerConfig): Promise<number> => {
+  // Use a scratch canvas so we don't disturb the live preview canvas.
+  const scratch = document.createElement('canvas');
+  scratch.width = config.width;
+  scratch.height = config.height;
+  const ctx = scratch.getContext('2d');
+  if (!ctx) return estimateOutputSizeKB(config);
+
+  const toBlob = (mime: string, quality?: number): Promise<Blob | null> =>
+    new Promise((resolve) => scratch.toBlob(resolve, mime, quality));
+
+  try {
+    // Static formats — render frame 0 in the target format. This is exact.
+    if (config.outputFormat !== 'gif') {
+      drawBannerFrame(ctx, config, 0, { forEncode: true });
+      const info = STATIC_FORMAT_INFO[config.outputFormat];
+      const blob = await toBlob(info.mime, info.quality);
+      if (!blob) return estimateOutputSizeKB(config);
+      return Math.max(1, Math.round(blob.size / 1024));
+    }
+
+    // GIF — sample 3 frames as PNG, extrapolate.
+    const indices = [
+      0,
+      Math.floor(config.numFrames / 2),
+      config.numFrames - 1,
+    ];
+    let totalPngBytes = 0;
+    for (const i of indices) {
+      drawBannerFrame(ctx, config, i, { forEncode: true });
+      const blob = await toBlob('image/png');
+      if (!blob) return estimateOutputSizeKB(config);
+      totalPngBytes += blob.size;
+    }
+    const avgPngPerFrame = totalPngBytes / indices.length;
+    const ratio = PNG_TO_GIF_RATIO_BY_TEXTURE[config.texture.type] ?? 0.5;
+    const gifBytes = avgPngPerFrame * ratio * config.numFrames + 800; // + header
+    return Math.max(2, Math.round(gifBytes / 1024));
+  } catch {
+    return estimateOutputSizeKB(config);
+  }
 };
 

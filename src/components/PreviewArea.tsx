@@ -5,6 +5,7 @@ import {
   generateStaticImage,
   drawBannerFrame,
   estimateOutputSizeKB,
+  measureOutputSizeKB,
 } from '../utils/gifHelper';
 import {
   Download,
@@ -15,6 +16,7 @@ import {
   ZoomOut,
   FileDown,
   CheckCircle2,
+  Layers,
 } from 'lucide-react';
 
 interface PreviewAreaProps {
@@ -45,9 +47,29 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({
   const requestRef = useRef<number>(0);
   const startTimeRef = useRef<number>(0);
 
-  const estimatedKB = useMemo(() => estimateOutputSizeKB(config), [config]);
+  const heuristicKB = useMemo(() => estimateOutputSizeKB(config), [config]);
+  const [measuredKB, setMeasuredKB] = useState<number | null>(null);
   const mode: OutputMode = config.outputFormat === 'gif' ? 'animated' : 'static';
   const isStatic = mode === 'static';
+
+  // Frame-sampled measurement — debounced 250ms so we don't run it on
+  // every keystroke. Falls back to the heuristic if measurement fails.
+  useEffect(() => {
+    setMeasuredKB(null);
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      const kb = await measureOutputSizeKB(config);
+      if (!cancelled) setMeasuredKB(kb);
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [config]);
+
+  // Display priority: post-generate actual > sampled measurement > heuristic.
+  const displayKB = actualKB ?? measuredKB ?? heuristicKB;
+  const displayKBIsExact = actualKB !== null;
 
   const animate = useCallback(
     (time: number) => {
@@ -165,19 +187,47 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({
       }}
     >
       <div className="flex-1 overflow-auto flex items-center justify-center relative z-10 custom-scrollbar p-4 sm:p-8 md:p-12">
+        {/* Workspace top-left status chip — anchored to the workspace, not the canvas */}
+        <div className="absolute top-3 left-3 sm:top-6 sm:left-6 z-20">
+          <TransparencyStatus
+            outsideTransparent={config.outsideTransparent}
+            format={config.outputFormat}
+          />
+        </div>
+
         <div
           className="relative transition-transform duration-200 ease-out"
           style={{ transform: `scale(${zoom})` }}
         >
-          <div className="relative shadow-2xl shadow-black/10 ring-1 ring-black/5 rounded-sm overflow-hidden bg-white">
+          <div
+            className="relative shadow-2xl shadow-black/10 ring-1 ring-black/5 rounded-sm overflow-hidden"
+            style={
+              config.outsideTransparent
+                ? {
+                    // Checkerboard pattern — shows users that the canvas pixels
+                    // outside the shape are truly transparent (Photoshop/Figma
+                    // convention). Matches what the exported PNG/WebP/GIF
+                    // will look like when placed on any background.
+                    backgroundImage:
+                      'linear-gradient(45deg, #d4d4d8 25%, transparent 25%), ' +
+                      'linear-gradient(-45deg, #d4d4d8 25%, transparent 25%), ' +
+                      'linear-gradient(45deg, transparent 75%, #d4d4d8 75%), ' +
+                      'linear-gradient(-45deg, transparent 75%, #d4d4d8 75%)',
+                    backgroundSize: '16px 16px',
+                    backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
+                    backgroundColor: '#ffffff',
+                  }
+                : { backgroundColor: '#ffffff' }
+            }
+          >
             <canvas
               ref={canvasRef}
-              className="block bg-white"
+              className="block"
               style={{ width: config.width, height: config.height }}
             />
           </div>
 
-          <div className="absolute -top-8 left-0 flex items-center gap-2">
+          <div className="absolute -top-8 left-0 flex items-center gap-1.5">
             <span className="bg-slate-800 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg">
               {config.width} × {config.height}
             </span>
@@ -271,14 +321,20 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({
               </div>
             )}
 
-            {/* Live file-size estimate */}
+            {/* Live file-size — sampled by encoding 1-3 real frames */}
             <div
               className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100/80 border border-slate-200/60 text-slate-600"
-              title={actualKB !== null ? 'Actual size of last export' : 'Estimated file size'}
+              title={
+                displayKBIsExact
+                  ? 'Actual size of last export'
+                  : measuredKB !== null
+                  ? 'Sampled from real frame encoding (close to actual)'
+                  : 'Rough estimate — refining...'
+              }
             >
               <FileDown className="w-3.5 h-3.5 text-slate-400" />
               <span className="text-[11px] font-mono font-semibold">
-                {actualKB !== null ? `${actualKB} KB` : `~${estimatedKB} KB`}
+                {displayKBIsExact ? `${displayKB} KB` : `~${displayKB} KB`}
               </span>
             </div>
 
@@ -342,6 +398,55 @@ const PreviewArea: React.FC<PreviewAreaProps> = ({
         </div>
       </div>
     </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// TransparencyStatus — small chip in the toolbar telling the user whether
+// the OUTSIDE of the banner shape will be transparent in the export. State
+// depends on (outsideTransparent toggle in Shape tab) × (selected format).
+// ---------------------------------------------------------------------------
+
+interface TransparencyStatusProps {
+  outsideTransparent: boolean;
+  format: OutputFormat;
+}
+
+const TransparencyStatus: React.FC<TransparencyStatusProps> = ({
+  outsideTransparent,
+  format,
+}) => {
+  // Decide the chip's color + label + tooltip from the (toggle × format) matrix.
+  let bgClass: string;
+  let label: string;
+  let tooltip: string;
+
+  if (format === 'jpeg' && outsideTransparent) {
+    // JPEG can't honor transparency — warn the user.
+    bgClass = 'bg-amber-500/95';
+    label = 'No alpha';
+    tooltip =
+      'JPEG has no alpha channel — the outside will be filled with the configured Outside Color regardless. Switch to PNG, WebP, or GIF for transparency.';
+  } else if (outsideTransparent) {
+    bgClass = 'bg-emerald-600/95';
+    label = 'Transparent';
+    tooltip =
+      'Outside the shape will be truly transparent in the export. Toggle off in Shape → Outside Area to use a solid color instead.';
+  } else {
+    bgClass = 'bg-slate-500/95';
+    label = 'Solid';
+    tooltip =
+      'Outside the shape will be filled with the configured Outside Color. Toggle on in Shape → Outside Area for transparency.';
+  }
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 ${bgClass} text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg`}
+      title={tooltip}
+    >
+      <Layers className="w-2.5 h-2.5" />
+      {label}
+    </span>
   );
 };
 

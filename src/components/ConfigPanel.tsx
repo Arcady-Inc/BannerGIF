@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Type, Palette, Shapes, Activity } from 'lucide-react';
 import { BannerConfig } from '../types';
+import { CustomFont } from '../utils/customFonts';
 import ContentTab from './tabs/ContentTab';
 import StyleTab from './tabs/StyleTab';
 import ShapeTab from './tabs/ShapeTab';
@@ -10,6 +11,8 @@ interface ConfigPanelProps {
   config: BannerConfig;
   onChange: (newConfig: BannerConfig) => void;
   isGenerating: boolean;
+  customFonts: CustomFont[];
+  onCustomFontsChange: (fonts: CustomFont[]) => void;
 }
 
 type TabKey = 'content' | 'style' | 'shape' | 'motion';
@@ -21,7 +24,12 @@ const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'motion',  label: 'Motion',  icon: <Activity className="w-3.5 h-3.5" /> },
 ];
 
-const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange }) => {
+const ConfigPanel: React.FC<ConfigPanelProps> = ({
+  config,
+  onChange,
+  customFonts,
+  onCustomFontsChange,
+}) => {
   const [tab, setTab] = useState<TabKey>('content');
 
   return (
@@ -83,7 +91,14 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange }) => {
 
       {/* ─── Tab content (scrollable) ───────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar">
-        {tab === 'content' && <ContentTab config={config} onChange={onChange} />}
+        {tab === 'content' && (
+          <ContentTab
+            config={config}
+            onChange={onChange}
+            customFonts={customFonts}
+            onCustomFontsChange={onCustomFontsChange}
+          />
+        )}
         {tab === 'style'   && <StyleTab config={config} onChange={onChange} />}
         {tab === 'shape'   && <ShapeTab config={config} onChange={onChange} />}
         {tab === 'motion'  && <MotionTab config={config} onChange={onChange} />}

@@ -85,6 +85,7 @@ export interface BannerConfig {
   fontFamily: string;
   fontSize: number;
   fontWeight: string;
+  fontStyle: 'normal' | 'italic';
 
   // Text stroke
   strokeColor: string;
@@ -115,8 +116,10 @@ export interface BannerConfig {
 export type OutputFormat = 'gif' | 'jpeg' | 'png' | 'webp';
 export type OutputMode = 'animated' | 'static';
 
-// The static formats. Order matters — first is the default when switching to static.
-export const STATIC_FORMATS: OutputFormat[] = ['jpeg', 'png', 'webp'];
+// The static formats. Order matters — first is the default when switching to
+// static, and it's the leftmost button in the sub-toggle. PNG comes first
+// because it's the most common pick (supports transparency, lossless).
+export const STATIC_FORMATS: OutputFormat[] = ['png', 'jpeg', 'webp'];
 
 // ============================================================================
 // Brand constants
@@ -155,6 +158,7 @@ export const DEFAULT_CONFIG: BannerConfig = {
   fontFamily: 'Inter',
   fontSize: 32,
   fontWeight: '700',
+  fontStyle: 'normal',
 
   strokeColor: '#000000',
   strokeWidth: 0,
@@ -261,13 +265,26 @@ export const FONTS = [
   { name: 'Monospace', value: 'monospace' },
 ];
 
-export const FONT_WEIGHTS = [
-  { name: 'Light', value: '300' },
-  { name: 'Normal', value: '400' },
-  { name: 'Medium', value: '500' },
-  { name: 'Bold', value: '700' },
-  { name: 'Extra Bold', value: '900' },
+// "Type" = weight + style. Picker for built-in fonts uses these defaults;
+// custom-imported Google fonts expose only the variants they actually have.
+export interface FontType {
+  name: string;
+  weight: string;
+  style: 'normal' | 'italic';
+}
+
+export const FONT_TYPES: FontType[] = [
+  { name: 'Light',       weight: '300', style: 'normal' },
+  { name: 'Regular',     weight: '400', style: 'normal' },
+  { name: 'Medium',      weight: '500', style: 'normal' },
+  { name: 'Bold',        weight: '700', style: 'normal' },
+  { name: 'Extra Bold',  weight: '900', style: 'normal' },
+  { name: 'Italic',      weight: '400', style: 'italic' },
+  { name: 'Bold Italic', weight: '700', style: 'italic' },
 ];
+
+// Backwards-compat alias for any old imports.
+export const FONT_WEIGHTS = FONT_TYPES;
 
 // ============================================================================
 // UI catalogs (for shape/texture pickers)
