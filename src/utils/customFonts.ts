@@ -231,21 +231,29 @@ export const weightsInRange = (min: number, max: number): StandardWeight[] =>
   STANDARD_WEIGHTS.filter((w) => w.value >= min && w.value <= max);
 
 /**
- * Wrap a font-family name in double quotes when it contains anything other
- * than letters, digits, or hyphens.
+ * Wrap a font-family name in double quotes — ALWAYS.
  *
- * Required for the canvas `ctx.font` shorthand (which fails SILENTLY on
- * unquoted family names containing spaces, parentheses, dots, etc. — the
- * assignment is ignored and the canvas keeps drawing in `10px sans-serif`).
- * Also safer for CSS inline `font-family` styles.
+ * Required for the canvas `ctx.font` shorthand, which fails SILENTLY on any
+ * invalid family identifier (the assignment is ignored and the canvas keeps
+ * drawing in its default `10px sans-serif`). CSS identifier rules are
+ * surprisingly restrictive:
+ *   - Cannot start with a digit (e.g. "30185.otf" → family "30185" is invalid)
+ *   - Cannot contain whitespace ("Open Sans" must be quoted)
+ *   - Cannot contain punctuation outside [A-Za-z0-9_-] (parens, dots, etc.)
+ *   - Cannot be a reserved keyword (inherit, serif, sans-serif, …)
+ *
+ * Always-quoting eliminates every edge case in one cheap operation. We used
+ * to skip quoting for "simple" names as a micro-optimization, but the regex
+ * accepted digit-leading names — which CSS rejects — so digit-named uploads
+ * silently broke font rendering.
  *
  * Examples:
- *   quoteFontFamily('Inter')                        // → 'Inter'
+ *   quoteFontFamily('Inter')                        // → '"Inter"'
  *   quoteFontFamily('Open Sans')                    // → '"Open Sans"'
+ *   quoteFontFamily('30185')                        // → '"30185"'
  *   quoteFontFamily('URBANIST-VARIABLEFONT (1)')    // → '"URBANIST-VARIABLEFONT (1)"'
  */
 export const quoteFontFamily = (family: string): string => {
-  if (/^[A-Za-z0-9-]+$/.test(family)) return family;
   // Escape any embedded double quotes so the CSS parser stays happy.
   return `"${family.replace(/"/g, '\\"')}"`;
 };
